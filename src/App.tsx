@@ -394,10 +394,10 @@ export default function App() {
               <h3 className="text-xl font-bold">Weather Data Unavailable</h3>
               <p className="text-xs text-slate-500 dark:text-white/60">{weatherError}</p>
               <button
-                onClick={() => loadWeather('Tokyo', 'Japan', 35.6762, 139.6503)}
+                onClick={() => handleUseGPS()}
                 className="px-5 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-white text-xs font-bold transition-all shadow-lg"
               >
-                Reload Default City
+                Reload Live Location
               </button>
             </div>
           ) : (

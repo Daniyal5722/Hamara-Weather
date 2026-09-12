@@ -99,11 +99,11 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="glass-card rounded-2xl px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-4 mb-6 transition-all">
-      {/* Brand Logo */}
+      {/* Brand Logo & Live Badge */}
       <div 
         className="flex items-center space-x-3 cursor-pointer group" 
-        onClick={() => onSelectCity('Tokyo', 'Japan', 35.6762, 139.6503)}
-        title="Reset to default Tokyo location"
+        onClick={onUseGPS}
+        title="Sync to your live current location"
       >
         <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-sky-400 to-indigo-500 flex items-center justify-center shadow-lg shadow-sky-500/30 group-hover:scale-105 transition-transform">
           <i className="fa-solid fa-sun text-white text-xl animate-spin-slow"></i>
