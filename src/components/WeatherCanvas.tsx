@@ -1,12 +1,17 @@
 import React, { useEffect, useRef } from 'react';
-import { WeatherCondition, ThemeMode } from '../types';
+import { WeatherCondition, ThemeMode, MotionMode } from '../types';
 
 interface WeatherCanvasProps {
   condition: WeatherCondition;
   theme: ThemeMode;
+  motionMode?: MotionMode;
 }
 
-export const WeatherCanvas: React.FC<WeatherCanvasProps> = ({ condition, theme }) => {
+export const WeatherCanvas: React.FC<WeatherCanvasProps> = ({
+  condition,
+  theme,
+  motionMode = 'standard'
+}) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -15,6 +20,10 @@ export const WeatherCanvas: React.FC<WeatherCanvasProps> = ({ condition, theme }
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    // Check system prefers-reduced-motion
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const isReducedMotion = motionMode === 'reduced' || prefersReducedMotion;
 
     let animationFrameId: number;
     let particles: Array<{
@@ -39,7 +48,7 @@ export const WeatherCanvas: React.FC<WeatherCanvasProps> = ({ condition, theme }
 
     const createParticles = () => {
       particles = [];
-      const particleCount = isRain ? 120 : isSnow ? 80 : isCloudy ? 40 : 50;
+      const particleCount = isReducedMotion ? 20 : isRain ? 120 : isSnow ? 80 : isCloudy ? 40 : 50;
 
       for (let i = 0; i < particleCount; i++) {
         particles.push({
@@ -60,8 +69,7 @@ export const WeatherCanvas: React.FC<WeatherCanvasProps> = ({ condition, theme }
     const render = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Random lightning flash for thunderstorm
-      if (condition === 'Thunderstorm' && Math.random() < 0.005) {
+      if (!isReducedMotion && condition === 'Thunderstorm' && Math.random() < 0.005) {
         flashAlpha = 0.35;
       }
 
@@ -73,7 +81,6 @@ export const WeatherCanvas: React.FC<WeatherCanvasProps> = ({ condition, theme }
 
       particles.forEach((p) => {
         if (isRain) {
-          // Render Rain drops
           ctx.beginPath();
           ctx.moveTo(p.x, p.y);
           ctx.lineTo(p.x + p.speedX * 2, p.y + (p.length || 12));
@@ -81,29 +88,31 @@ export const WeatherCanvas: React.FC<WeatherCanvasProps> = ({ condition, theme }
           ctx.lineWidth = p.radius;
           ctx.stroke();
 
-          p.y += p.speedY;
-          p.x += p.speedX;
+          if (!isReducedMotion) {
+            p.y += p.speedY;
+            p.x += p.speedX;
 
-          if (p.y > canvas.height) {
-            p.y = -20;
-            p.x = Math.random() * canvas.width;
+            if (p.y > canvas.height) {
+              p.y = -20;
+              p.x = Math.random() * canvas.width;
+            }
           }
         } else if (isSnow) {
-          // Render Snowflakes
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
           ctx.fillStyle = `rgba(255, 255, 255, ${p.alpha})`;
           ctx.fill();
 
-          p.y += p.speedY;
-          p.x += Math.sin(p.y * 0.02) * 0.5;
+          if (!isReducedMotion) {
+            p.y += p.speedY;
+            p.x += Math.sin(p.y * 0.02) * 0.5;
 
-          if (p.y > canvas.height) {
-            p.y = -10;
-            p.x = Math.random() * canvas.width;
+            if (p.y > canvas.height) {
+              p.y = -10;
+              p.x = Math.random() * canvas.width;
+            }
           }
         } else {
-          // Render Atmospheric floating dust/bokeh particles
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
           
@@ -118,17 +127,21 @@ export const WeatherCanvas: React.FC<WeatherCanvasProps> = ({ condition, theme }
           }
           ctx.fill();
 
-          p.y -= p.speedY;
-          p.x += p.speedX;
+          if (!isReducedMotion) {
+            p.y -= p.speedY;
+            p.x += p.speedX;
 
-          if (p.y < -10) {
-            p.y = canvas.height + 10;
-            p.x = Math.random() * canvas.width;
+            if (p.y < -10) {
+              p.y = canvas.height + 10;
+              p.x = Math.random() * canvas.width;
+            }
           }
         }
       });
 
-      animationFrameId = requestAnimationFrame(render);
+      if (!isReducedMotion) {
+        animationFrameId = requestAnimationFrame(render);
+      }
     };
 
     resizeCanvas();
@@ -138,15 +151,16 @@ export const WeatherCanvas: React.FC<WeatherCanvasProps> = ({ condition, theme }
     const handleResize = () => {
       resizeCanvas();
       createParticles();
+      if (isReducedMotion) render();
     };
 
     window.addEventListener('resize', handleResize);
 
     return () => {
-      cancelAnimationFrame(animationFrameId);
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
       window.removeEventListener('resize', handleResize);
     };
-  }, [condition, theme]);
+  }, [condition, theme, motionMode]);
 
   return (
     <canvas

@@ -36,6 +36,7 @@ export interface CityWeatherData {
   id: string;
   cityName: string;
   country: string;
+  admin1?: string; // State/Region
   lat: number;
   lon: number;
   currentTemp: number;
@@ -60,7 +61,26 @@ export interface CityWeatherData {
   hourly: HourlyForecastItem[];
   daily: DailyForecastItem[];
   insight: string;
+  isLiveApi?: boolean;
+}
+
+export interface FavoriteLocation {
+  id: string;
+  cityName: string;
+  country: string;
+  lat: number;
+  lon: number;
+}
+
+export interface SearchResultItem {
+  id: number;
+  name: string;
+  country: string;
+  admin1?: string;
+  latitude: number;
+  longitude: number;
 }
 
 export type TemperatureUnit = 'C' | 'F';
-export type ThemeMode = 'dark' | 'light';
+export type ThemeMode = 'dark' | 'light' | 'system';
+export type MotionMode = 'standard' | 'reduced';

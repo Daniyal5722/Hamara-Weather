@@ -1,0 +1,22 @@
+{
+  "short_name": "Hamara Weather",
+  "name": "Hamara Weather - 24-Hour Forecast & Live Atmospheric Experience",
+  "icons": [
+    {
+      "src": "https://images.unsplash.com/photo-1534088568595-a066f410bcda?q=80&w=192&auto=format&fit=crop",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://images.unsplash.com/photo-1534088568595-a066f410bcda?q=80&w=512&auto=format&fit=crop",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "display": "standalone",
+  "orientation": "any",
+  "description": "Next-Gen 24-Hour Hourly Weather Forecast with interactive temperature trend lines, glassmorphic UI, live atmospheric canvas animations, and real-time global weather tracking."
+}
