@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://hamaraweather.app/sitemap.xml

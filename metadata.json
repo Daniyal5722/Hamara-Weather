@@ -1,0 +1,6 @@
+{
+  "name": "Hamara Weather",
+  "description": "Next-Gen 24-Hour Hourly Forecast & Live Atmospheric Weather Experience with glassmorphic UI, interactive trends, and responsive dynamic visuals.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
