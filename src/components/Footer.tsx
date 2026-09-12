@@ -18,13 +18,16 @@ export const Footer: React.FC<FooterProps> = ({ onSelectCity }) => {
   return (
     <footer className="mt-12 pt-8 pb-6 border-t border-slate-300/40 dark:border-white/10 text-slate-600 dark:text-white/60 text-xs">
       <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-        {/* Brand & Copyright */}
-        <div className="text-center md:text-left">
+        {/* Brand, Copyright & Open-Meteo Attribution */}
+        <div className="text-center md:text-left space-y-1">
           <p className="font-bold text-slate-800 dark:text-slate-200 text-sm flex items-center justify-center md:justify-start gap-1.5">
             <i className="fa-solid fa-sun text-amber-500"></i>
             Hamara Weather Website Suite
           </p>
-          <p className="mt-1 opacity-80">
+          <p className="opacity-80 text-[11px]">
+            Powered by Open-Meteo non-commercial Weather API & Geocoding Service. No proprietary keys required.
+          </p>
+          <p className="opacity-60 text-[10px]">
             © {new Date().getFullYear()} Hamara Weather. Crafted with Precision Glassmorphism & Atmospheric Live Graphics.
           </p>
         </div>

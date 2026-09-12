@@ -1,5 +1,5 @@
 import { CityWeatherData, HourlyForecastItem, DailyForecastItem, WeatherCondition, SearchResultItem } from '../types';
-import { generateWeatherDataForCity } from '../data/weatherData';
+import { generateWeatherDataForCity, findNearestCity } from '../data/weatherData';
 
 // Map WMO Weather Interpretation Codes from Open-Meteo
 export function mapWmoCodeToCondition(code: number, isNight: boolean = false): { condition: WeatherCondition; icon: string } {
@@ -52,6 +52,98 @@ export function windAngleToDirection(degrees: number): string {
   return directions[index];
 }
 
+// Format local ISO time string e.g. "2026-09-12T14:30" to "2:30 PM"
+function formatIsoTimeTo12h(isoStr?: string): string {
+  if (!isoStr || !isoStr.includes('T')) return '12:00 PM';
+  const timePart = isoStr.split('T')[1];
+  if (!timePart) return '12:00 PM';
+  const [hStr, mStr] = timePart.split(':');
+  const h = parseInt(hStr, 10);
+  const m = mStr ? mStr.slice(0, 2) : '00';
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  return `${h12}:${m} ${ampm}`;
+}
+
+// Format local ISO hour string e.g. "2026-09-12T14:00" to "2 PM"
+function formatIsoHourTo12h(isoStr?: string): string {
+  if (!isoStr || !isoStr.includes('T')) return '12 PM';
+  const timePart = isoStr.split('T')[1];
+  if (!timePart) return '12 PM';
+  const h = parseInt(timePart.split(':')[0], 10);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  return `${h12} ${ampm}`;
+}
+
+// Reverse Geocode latitude and longitude to exact location name (City, Admin Region, Country)
+export async function reverseGeocodeCoords(lat: number, lon: number): Promise<{ cityName: string; countryName: string; admin1?: string }> {
+  // Provider 1: BigDataCloud Reverse Geocoding
+  try {
+    const bdcUrl = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`;
+    const res = await fetch(bdcUrl);
+    if (res.ok) {
+      const data = await res.json();
+      const city = data.city || data.locality || data.localityInfo?.administrative?.[2]?.name || data.localityInfo?.administrative?.[1]?.name;
+      const country = data.countryName || '';
+      const admin1 = data.principalSubdivision || '';
+      if (city) {
+        return { cityName: city, countryName: country || 'Global', admin1 };
+      }
+    }
+  } catch (err) {
+    console.warn('BigDataCloud reverse geocoding failed:', err);
+  }
+
+  // Provider 2: Nominatim OpenStreetMap Reverse Geocoding
+  try {
+    const nomUrl = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
+    const res = await fetch(nomUrl, { headers: { 'Accept-Language': 'en' } });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.address) {
+        const addr = data.address;
+        const city = addr.city || addr.town || addr.village || addr.suburb || addr.municipality || addr.county || addr.state_district;
+        const country = addr.country || '';
+        const admin1 = addr.state || '';
+        if (city) {
+          return { cityName: city, countryName: country || 'Global', admin1 };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Nominatim reverse geocoding failed:', err);
+  }
+
+  // Provider 3: Open-Meteo Geocoding lookup by coordinates range or distance check to static database
+  const { nearest, distanceKm } = findNearestCity(lat, lon);
+  if (distanceKm < 50) {
+    return { cityName: nearest.name, countryName: nearest.country };
+  }
+
+  return { cityName: `Location (${lat.toFixed(2)}°, ${lon.toFixed(2)}°)`, countryName: 'Current GPS' };
+}
+
+// Fetch IP-based current location as fallback when browser GPS is blocked/denied
+export async function fetchIpLocation(): Promise<{ cityName: string; countryName: string; lat: number; lon: number } | null> {
+  try {
+    const res = await fetch('https://get.geojs.io/v1/ip/geo.json');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.latitude && data.longitude) {
+        const lat = parseFloat(data.latitude);
+        const lon = parseFloat(data.longitude);
+        const cityName = data.city || 'My Location';
+        const countryName = data.country || 'Global';
+        return { cityName, countryName, lat, lon };
+      }
+    }
+  } catch (err) {
+    console.warn('IP location fallback failed:', err);
+  }
+  return null;
+}
+
 // Search locations using Open-Meteo Geocoding API
 export async function searchLocations(query: string): Promise<SearchResultItem[]> {
   if (!query || query.trim().length < 2) return [];
@@ -87,34 +179,54 @@ export async function fetchLiveWeatherData(
   admin1?: string
 ): Promise<CityWeatherData> {
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,surface_pressure,wind_speed_10m,wind_direction_10m&hourly=temperature_2m,relative_humidity_2m,dew_point_2m,apparent_temperature,precipitation_probability,weather_code,surface_pressure,visibility,wind_speed_10m,uv_index&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max&timezone=auto`;
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,surface_pressure,wind_speed_10m,wind_direction_10m&hourly=temperature_2m,relative_humidity_2m,dew_point_2m,apparent_temperature,precipitation_probability,weather_code,surface_pressure,visibility,wind_speed_10m,uv_index&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,precipitation_probability_max&timezone=auto`;
+    const aqiUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi&timezone=auto`;
 
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`Open-Meteo API status ${res.status}`);
+    const [resWeather, resAqi] = await Promise.all([
+      fetch(weatherUrl),
+      fetch(aqiUrl).catch(() => null)
+    ]);
+
+    if (!resWeather.ok) {
+      throw new Error(`Open-Meteo API status ${resWeather.status}`);
     }
 
-    const data = await res.json();
+    const data = await resWeather.json();
     const current = data.current;
     const hourlyData = data.hourly;
     const dailyData = data.daily;
 
+    let usAqi = 35;
+    if (resAqi && resAqi.ok) {
+      const aqiData = await resAqi.json();
+      if (aqiData.current?.us_aqi !== undefined && aqiData.current?.us_aqi !== null) {
+        usAqi = Math.round(aqiData.current.us_aqi);
+      }
+    }
+
     const isNight = current.is_day === 0;
     const { condition, icon } = mapWmoCodeToCondition(current.weather_code, isNight);
 
-    // Map 24 hours timeline
-    const currentHourIndex = new Date().getHours();
+    // Align starting hourly index with current local time of location
+    let startIndex = 0;
+    if (hourlyData?.time && Array.isArray(hourlyData.time) && current?.time) {
+      const matchIdx = hourlyData.time.findIndex((t: string) => t === current.time);
+      if (matchIdx >= 0) {
+        startIndex = matchIdx;
+      }
+    }
+
+    // Map 24 hours timeline starting from current local hour
     const hourly: HourlyForecastItem[] = [];
+    const totalHourlyRecords = hourlyData.time?.length || 24;
 
     for (let i = 0; i < 24; i++) {
-      const idx = i;
+      const idx = (startIndex + i) % totalHourlyRecords;
       const rawTime = hourlyData.time[idx];
-      const timeDate = rawTime ? new Date(rawTime) : new Date();
-      timeDate.setHours(timeDate.getHours());
-
-      const hour24 = timeDate.getHours();
+      const hour24 = rawTime && rawTime.includes('T') ? parseInt(rawTime.split('T')[1].split(':')[0], 10) : i;
       const hourNight = hour24 >= 19 || hour24 < 6;
-      const timeLabel = i === 0 ? 'Now' : timeDate.toLocaleTimeString([], { hour: 'numeric' });
+
+      const timeLabel = i === 0 ? 'Now' : formatIsoHourTo12h(rawTime);
 
       const hCode = hourlyData.weather_code?.[idx] ?? 0;
       const hCond = mapWmoCodeToCondition(hCode, hourNight);
@@ -140,9 +252,17 @@ export async function fetchLiveWeatherData(
 
     for (let d = 0; d < 7; d++) {
       const dateStrRaw = dailyData.time?.[d];
-      const dDate = dateStrRaw ? new Date(dateStrRaw) : new Date();
-      const dayName = d === 0 ? 'Today' : daysOfWeek[dDate.getDay()];
-      const formattedDateStr = dDate.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      let dayName = 'Today';
+      let formattedDateStr = 'Today';
+
+      if (dateStrRaw) {
+        const parts = dateStrRaw.split('-');
+        if (parts.length === 3) {
+          const dDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+          dayName = d === 0 ? 'Today' : daysOfWeek[dDate.getDay()];
+          formattedDateStr = dDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+      }
 
       const dCode = dailyData.weather_code?.[d] ?? 0;
       const dCond = mapWmoCodeToCondition(dCode, false);
@@ -163,7 +283,7 @@ export async function fetchLiveWeatherData(
     const highTemp = daily[0]?.maxTemp ?? currentTemp + 3;
     const lowTemp = daily[0]?.minTemp ?? currentTemp - 4;
     const humidity = Math.round(current.relative_humidity_2m ?? 60);
-    const dewPoint = Math.round(hourlyData.dew_point_2m?.[0] ?? currentTemp - 5);
+    const dewPoint = Math.round(hourlyData.dew_point_2m?.[startIndex] ?? currentTemp - 5);
     const windSpeed = Math.round(current.wind_speed_10m ?? 12);
     const windAngle = Math.round(current.wind_direction_10m ?? 45);
     const windDirection = windAngleToDirection(windAngle);
@@ -175,39 +295,33 @@ export async function fetchLiveWeatherData(
     else if (uvVal >= 8) uvLevel = 'Very High';
 
     const pressure = Math.round(current.surface_pressure ?? 1013);
-    const rawVis = hourlyData.visibility?.[0] ? (hourlyData.visibility[0] / 1000).toFixed(1) : '10.0';
+    const rawVis = hourlyData.visibility?.[startIndex] ? (hourlyData.visibility[startIndex] / 1000).toFixed(1) : '10.0';
     const visibility = `${rawVis} km`;
 
-    // Format Sunrise & Sunset
-    const formatTime = (isoStr?: string) => {
-      if (!isoStr) return '06:00 AM';
-      const dt = new Date(isoStr);
-      return dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    };
+    // Sunrise & Sunset formatted in local timezone time
+    const sunrise = formatIsoTimeTo12h(dailyData.sunrise?.[0]);
+    const sunset = formatIsoTimeTo12h(dailyData.sunset?.[0]);
 
-    const sunrise = formatTime(dailyData.sunrise?.[0]);
-    const sunset = formatTime(dailyData.sunset?.[0]);
-
-    // Simulated AQI
-    const aqiVal = Math.min(180, Math.max(15, Math.round(25 + (lat % 20) * 3)));
+    // AQI Classification
     let aqiLabel = 'Good';
-    if (aqiVal > 50 && aqiVal <= 100) aqiLabel = 'Moderate';
-    else if (aqiVal > 100) aqiLabel = 'Unhealthy';
+    if (usAqi > 50 && usAqi <= 100) aqiLabel = 'Moderate';
+    else if (usAqi > 100 && usAqi <= 150) aqiLabel = 'Unhealthy (Sensitive)';
+    else if (usAqi > 150) aqiLabel = 'Unhealthy';
 
-    // Insight
+    // Weather Insight
     let insight = 'Pleasant atmospheric balance with mild breeze.';
     if (condition.includes('Rain') || condition === 'Thunderstorm') {
       insight = 'Precipitation active today. Remember your umbrella when heading out!';
     } else if (uvVal >= 6) {
       insight = 'High UV index today. Sun protection and sunglasses recommended.';
-    } else if (currentTemp > 28) {
+    } else if (currentTemp > 30) {
       insight = 'Warm temperatures today. Stay hydrated during outdoor activities.';
     } else if (currentTemp < 5) {
       insight = 'Cold atmospheric temperature. Dress in warm layers.';
     }
 
     return {
-      id: `${cityName.toLowerCase().replace(/\s+/g, '-')}-${Math.round(lat)}`,
+      id: `${cityName.toLowerCase().replace(/\s+/g, '-')}-${Math.round(lat * 100)}`,
       cityName,
       country: countryName,
       admin1,
@@ -228,7 +342,7 @@ export async function fetchLiveWeatherData(
       uvLevel,
       pressure,
       visibility,
-      airQualityIndex: aqiVal,
+      airQualityIndex: usAqi,
       airQualityLabel: aqiLabel,
       sunrise,
       sunset,

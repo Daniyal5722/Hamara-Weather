@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CityWeatherData, TemperatureUnit, ThemeMode, MotionMode, FavoriteLocation } from './types';
 import { generateWeatherDataForCity, CITIES_DATABASE, findNearestCity } from './data/weatherData';
-import { fetchLiveWeatherData } from './services/weatherApi';
+import { fetchLiveWeatherData, searchLocations, reverseGeocodeCoords, fetchIpLocation } from './services/weatherApi';
 import { WeatherCanvas } from './components/WeatherCanvas';
 import { Header } from './components/Header';
 import { FavoritesBar } from './components/FavoritesBar';
@@ -201,29 +201,40 @@ export default function App() {
     setIsWeatherLoading(true);
     setWeatherError(null);
 
-    // Add to recent searches
-    addRecentSearch(cityName);
-
     try {
       let targetLat = lat;
       let targetLon = lon;
-      let targetCountry = country || 'Global';
+      let targetCountry = country || '';
+      let targetCityName = cityName;
+      let admin1: string | undefined = undefined;
 
-      // If lat/lon not provided, lookup matched city in database or fallback
-      if (!targetLat || !targetLon) {
-        const matched = CITIES_DATABASE.find((c) => c.name.toLowerCase() === cityName.toLowerCase());
-        if (matched) {
-          targetLat = matched.lat;
-          targetLon = matched.lon;
-          targetCountry = matched.country;
+      // If lat/lon not provided, try live Open-Meteo Geocoding first!
+      if (targetLat === undefined || targetLon === undefined) {
+        const geoResults = await searchLocations(cityName);
+        if (geoResults && geoResults.length > 0) {
+          const topResult = geoResults[0];
+          targetLat = topResult.latitude;
+          targetLon = topResult.longitude;
+          targetCityName = topResult.name;
+          targetCountry = topResult.country || 'Global';
+          admin1 = topResult.admin1;
         } else {
-          // Default Tokyo coordinates if completely unknown
-          targetLat = 35.6762;
-          targetLon = 139.6503;
+          const matched = CITIES_DATABASE.find((c) => c.name.toLowerCase() === cityName.toLowerCase());
+          if (matched) {
+            targetLat = matched.lat;
+            targetLon = matched.lon;
+            targetCountry = matched.country;
+          } else {
+            targetLat = 35.6762;
+            targetLon = 139.6503;
+            targetCountry = 'Japan';
+          }
         }
       }
 
-      const liveData = await fetchLiveWeatherData(targetLat, targetLon, cityName, targetCountry);
+      addRecentSearch(targetCityName);
+
+      const liveData = await fetchLiveWeatherData(targetLat, targetLon, targetCityName, targetCountry, admin1);
       setCityWeather(liveData);
     } catch (err) {
       console.warn('Weather fetch encountered issue, using fallback:', err);
@@ -234,13 +245,9 @@ export default function App() {
     }
   };
 
-  // Initial load on mount
+  // Initial load on mount: default to user's current location automatically
   useEffect(() => {
-    if (gpsConfig.autoDetectOnStartup) {
-      handleUseGPS();
-    } else {
-      loadWeather('Tokyo', 'Japan', 35.6762, 139.6503);
-    }
+    handleUseGPS(true);
   }, []);
 
   const handleSelectCity = (cityName: string, country?: string, lat?: number, lon?: number) => {
@@ -251,14 +258,18 @@ export default function App() {
     loadWeather(fav.cityName, fav.country, fav.lat, fav.lon);
   };
 
-  const handleUseGPS = () => {
-    if (!navigator.geolocation) {
-      showNotification('Geolocation is not supported by your browser.');
-      return;
+  // Robust GPS Geolocation strategy with immediate reverse geocoding and fallback
+  const handleUseGPS = (isInitialMount: boolean = false) => {
+    setIsLoadingGPS(true);
+    if (!isInitialMount) {
+      showNotification('Acquiring satellite GPS position...');
     }
 
-    setIsLoadingGPS(true);
-    showNotification('Acquiring satellite GPS position...');
+    if (!navigator.geolocation) {
+      console.warn('Geolocation API is not supported by browser.');
+      handleGpsFallback(isInitialMount);
+      return;
+    }
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
@@ -266,31 +277,53 @@ export default function App() {
         setLastCoords({ lat: latitude, lon: longitude, accuracy });
 
         try {
-          const { nearest, distanceKm } = findNearestCity(latitude, longitude);
-          const name = distanceKm < 40 ? nearest.name : `GPS (${latitude.toFixed(2)}°, ${longitude.toFixed(2)}°)`;
-          const countryName = distanceKm < 40 ? nearest.country : 'Current Location';
-
-          await loadWeather(name, countryName, latitude, longitude);
-          showNotification(`Synced GPS Location! (${latitude.toFixed(2)}°, ${longitude.toFixed(2)}°)`);
+          // Perform immediate reverse geocoding API request right after obtaining coordinates
+          const geo = await reverseGeocodeCoords(latitude, longitude);
+          
+          await loadWeather(geo.cityName, geo.countryName, latitude, longitude);
+          if (!isInitialMount) {
+            showNotification(`Synced GPS Location: ${geo.cityName} (${geo.countryName})`);
+          }
         } catch (err) {
+          console.warn('Reverse geocoding error:', err);
           const fallback = generateWeatherDataForCity(`GPS (${latitude.toFixed(2)}°, ${longitude.toFixed(2)}°)`, 'Current Location');
           setCityWeather(fallback);
-          showNotification('Synced GPS position.');
         } finally {
           setIsLoadingGPS(false);
         }
       },
-      (error) => {
-        setIsLoadingGPS(false);
+      async (error) => {
         console.warn('GPS Error:', error.message);
-        showNotification('GPS access denied or timed out. Please check location permissions.');
+        if (!isInitialMount) {
+          showNotification('GPS access unavailable. Falling back to approximate location.');
+        }
+        await handleGpsFallback(isInitialMount);
       },
       {
         enableHighAccuracy: gpsConfig.highAccuracy,
-        timeout: gpsConfig.timeoutMs,
+        timeout: isInitialMount ? 5000 : gpsConfig.timeoutMs,
         maximumAge: 0
       }
     );
+  };
+
+  const handleGpsFallback = async (isInitialMount: boolean) => {
+    try {
+      // Try IP-based location fallback first
+      const ipLoc = await fetchIpLocation();
+      if (ipLoc) {
+        await loadWeather(ipLoc.cityName, ipLoc.countryName, ipLoc.lat, ipLoc.lon);
+        if (!isInitialMount) {
+          showNotification(`Location detected: ${ipLoc.cityName} (${ipLoc.countryName})`);
+        }
+        setIsLoadingGPS(false);
+        return;
+      }
+    } catch (e) {}
+
+    // Default city fallback if IP lookup also fails
+    await loadWeather('Tokyo', 'Japan', 35.6762, 139.6503);
+    setIsLoadingGPS(false);
   };
 
   const showNotification = (msg: string) => {
