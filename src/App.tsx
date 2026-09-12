@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CityWeatherData, TemperatureUnit, ThemeMode } from './types';
-import { generateWeatherDataForCity, CITIES_DATABASE } from './data/weatherData';
+import { generateWeatherDataForCity, CITIES_DATABASE, fetchWeatherForCoordinates, findNearestCity } from './data/weatherData';
 import { WeatherCanvas } from './components/WeatherCanvas';
 import { Header } from './components/Header';
 import { HeroCurrentWeather } from './components/HeroCurrentWeather';
@@ -8,6 +8,7 @@ import { WeatherMetricsGrid } from './components/WeatherMetricsGrid';
 import { HourlyTimeline } from './components/HourlyTimeline';
 import { WeeklyForecast } from './components/WeeklyForecast';
 import { Footer } from './components/Footer';
+import { GpsSettingsModal, GpsSettingsConfig } from './components/GpsSettingsModal';
 
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>('dark');
@@ -17,6 +18,22 @@ export default function App() {
   );
   const [isLoadingGPS, setIsLoadingGPS] = useState(false);
   const [notification, setNotification] = useState<string | null>(null);
+  const [isGpsModalOpen, setIsGpsModalOpen] = useState(false);
+
+  // GPS Settings configuration state stored in localStorage
+  const [gpsConfig, setGpsConfig] = useState<GpsSettingsConfig>(() => {
+    try {
+      const saved = localStorage.getItem('hamara_gps_config');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {
+      autoDetectOnStartup: false,
+      highAccuracy: true,
+      timeoutMs: 10000
+    };
+  });
+
+  const [lastCoords, setLastCoords] = useState<{ lat: number; lon: number; accuracy?: number } | null>(null);
 
   // Sync theme class on HTML element
   useEffect(() => {
@@ -26,6 +43,22 @@ export default function App() {
       document.documentElement.classList.remove('dark');
     }
   }, [theme]);
+
+  // Persist GPS config
+  const handleUpdateGpsConfig = (newConfig: GpsSettingsConfig) => {
+    setGpsConfig(newConfig);
+    try {
+      localStorage.setItem('hamara_gps_config', JSON.stringify(newConfig));
+    } catch (e) {}
+    showNotification('GPS Preferences Saved');
+  };
+
+  // Auto-detect GPS on startup if enabled
+  useEffect(() => {
+    if (gpsConfig.autoDetectOnStartup) {
+      handleUseGPS();
+    }
+  }, []);
 
   const handleToggleTheme = () => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
@@ -57,30 +90,35 @@ export default function App() {
     }
 
     setIsLoadingGPS(true);
-    showNotification('Locating your GPS coordinates...');
+    showNotification('Acquiring satellite GPS position...');
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setIsLoadingGPS(false);
-        const { latitude, longitude } = position.coords;
+      async (position) => {
+        const { latitude, longitude, accuracy } = position.coords;
+        setLastCoords({ lat: latitude, lon: longitude, accuracy });
 
-        // Find closest city from database or generate custom location
-        const customName = `Location (${latitude.toFixed(2)}°, ${longitude.toFixed(2)}°)`;
-        const localTemp = Math.round(18 + Math.abs(latitude % 10));
-
-        const gpsWeather = generateWeatherDataForCity('Your Location', 'GPS Coordinates', localTemp);
-        gpsWeather.lat = latitude;
-        gpsWeather.lon = longitude;
-
-        setCityWeather(gpsWeather);
-        showNotification('Successfully synced weather for your current GPS location!');
+        try {
+          const gpsWeather = await fetchWeatherForCoordinates(latitude, longitude, gpsConfig.highAccuracy);
+          setCityWeather(gpsWeather);
+          showNotification(`Synced GPS Location! (${latitude.toFixed(2)}°, ${longitude.toFixed(2)}°)`);
+        } catch (err) {
+          const fallback = generateWeatherDataForCity(`GPS (${latitude.toFixed(2)}°, ${longitude.toFixed(2)}°)`, 'Current Location');
+          setCityWeather(fallback);
+          showNotification('Synced GPS position.');
+        } finally {
+          setIsLoadingGPS(false);
+        }
       },
       (error) => {
         setIsLoadingGPS(false);
         console.warn('GPS Error:', error.message);
-        showNotification('GPS access denied or unavailable. Showing Tokyo as default.');
+        showNotification('GPS access denied or timed out. Please check location permissions.');
       },
-      { timeout: 8000 }
+      {
+        enableHighAccuracy: gpsConfig.highAccuracy,
+        timeout: gpsConfig.timeoutMs,
+        maximumAge: 0
+      }
     );
   };
 
@@ -90,6 +128,8 @@ export default function App() {
       setNotification((curr) => (curr === msg ? null : curr));
     }, 4000);
   };
+
+  const nearestCityInfo = lastCoords ? findNearestCity(lastCoords.lat, lastCoords.lon) : null;
 
   return (
     <div className={`min-h-screen relative flex flex-col justify-between transition-colors duration-500 ${
@@ -109,6 +149,7 @@ export default function App() {
           onSelectCity={handleSelectCity}
           onUseGPS={handleUseGPS}
           isLoadingGPS={isLoadingGPS}
+          onOpenGpsSettings={() => setIsGpsModalOpen(true)}
         />
 
         {/* Notification Toast */}
@@ -140,6 +181,19 @@ export default function App() {
 
         {/* Footer */}
         <Footer onSelectCity={handleSelectCity} />
+
+        {/* GPS Settings Modal */}
+        <GpsSettingsModal
+          isOpen={isGpsModalOpen}
+          onClose={() => setIsGpsModalOpen(false)}
+          config={gpsConfig}
+          onUpdateConfig={handleUpdateGpsConfig}
+          onSyncGPS={handleUseGPS}
+          isLoadingGPS={isLoadingGPS}
+          lastCoords={lastCoords}
+          nearestCityName={nearestCityInfo?.nearest.name}
+          distanceKm={nearestCityInfo?.distanceKm}
+        />
       </div>
     </div>
   );

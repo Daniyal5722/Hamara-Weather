@@ -10,6 +10,7 @@ interface HeaderProps {
   onSelectCity: (cityName: string, country?: string) => void;
   onUseGPS: () => void;
   isLoadingGPS: boolean;
+  onOpenGpsSettings: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -19,7 +20,8 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleTheme,
   onSelectCity,
   onUseGPS,
-  isLoadingGPS
+  isLoadingGPS,
+  onOpenGpsSettings
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -124,7 +126,7 @@ export const Header: React.FC<HeaderProps> = ({
         )}
       </div>
 
-      {/* Right Controls (GPS, Unit Toggle, Dark/Light Mode) */}
+      {/* Right Controls (GPS, GPS Settings, Unit Toggle, Dark/Light Mode) */}
       <div className="flex items-center space-x-2 sm:space-x-3">
         <button
           id="gpsBtn"
@@ -135,6 +137,15 @@ export const Header: React.FC<HeaderProps> = ({
           className="p-2.5 rounded-xl bg-white/20 dark:bg-white/10 hover:bg-sky-500/20 border border-slate-300/40 dark:border-white/20 text-sky-500 dark:text-sky-400 transition-all active:scale-95 disabled:opacity-50"
         >
           <i className={`fa-solid ${isLoadingGPS ? 'fa-spinner animate-spin' : 'fa-location-crosshairs'} text-base`}></i>
+        </button>
+
+        <button
+          onClick={onOpenGpsSettings}
+          title="GPS Location Settings"
+          aria-label="Open GPS Location Settings"
+          className="p-2.5 rounded-xl bg-white/20 dark:bg-white/10 hover:bg-sky-500/20 border border-slate-300/40 dark:border-white/20 text-slate-600 dark:text-sky-300 transition-all active:scale-95"
+        >
+          <i className="fa-solid fa-gear text-base"></i>
         </button>
 
         <button

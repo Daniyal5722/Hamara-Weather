@@ -19,6 +19,61 @@ export const CITIES_DATABASE: Array<{ name: string; country: string; lat: number
   { name: 'Los Angeles', country: 'United States', lat: 34.0522, lon: -118.2437 }
 ];
 
+export function findNearestCity(lat: number, lon: number) {
+  let nearest = CITIES_DATABASE[0];
+  let minDistance = Infinity;
+
+  for (const city of CITIES_DATABASE) {
+    const dLat = (city.lat - lat) * (Math.PI / 180);
+    const dLon = (city.lon - lon) * (Math.PI / 180);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat * (Math.PI / 180)) * Math.cos(city.lat * (Math.PI / 180)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = 6371 * c; // Earth radius in km
+
+    if (distance < minDistance) {
+      minDistance = distance;
+      nearest = city;
+    }
+  }
+
+  return { nearest, distanceKm: Math.round(minDistance) };
+}
+
+export async function fetchWeatherForCoordinates(lat: number, lon: number, highAccuracy = true): Promise<CityWeatherData> {
+  const { nearest, distanceKm } = findNearestCity(lat, lon);
+  
+  try {
+    const response = await fetch(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&hourly=temperature_2m,relative_humidity_2m,precipitation_probability,weathercode,windspeed_10m&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=auto`
+    );
+
+    if (response.ok) {
+      const data = await response.json();
+      const current = data.current_weather;
+      
+      const cityName = distanceKm < 40 ? nearest.name : `GPS (${lat.toFixed(2)}°, ${lon.toFixed(2)}°)`;
+      const countryName = distanceKm < 40 ? `${nearest.country} (Near ${nearest.name})` : 'Current Location';
+
+      const baseData = generateWeatherDataForCity(cityName, countryName, current?.temperature ?? 20);
+      baseData.lat = lat;
+      baseData.lon = lon;
+      if (current?.windspeed) baseData.windSpeed = Math.round(current.windspeed);
+      return baseData;
+    }
+  } catch (err) {
+    console.warn('Open-Meteo API fallback to generator:', err);
+  }
+
+  const fallbackCityName = distanceKm < 60 ? `Near ${nearest.name}` : `GPS (${lat.toFixed(2)}°, ${lon.toFixed(2)}°)`;
+  const fallbackData = generateWeatherDataForCity(fallbackCityName, nearest.country);
+  fallbackData.lat = lat;
+  fallbackData.lon = lon;
+  return fallbackData;
+}
+
 export function generateWeatherDataForCity(cityName: string, country: string = 'Global', customBaseTemp?: number): CityWeatherData {
   const seed = cityName.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
   
